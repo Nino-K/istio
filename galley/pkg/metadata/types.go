@@ -169,6 +169,9 @@ var (
 	// Sidecar metadata
 	Sidecar resource.Info
 
+	// SyntheticServiceEntry metadata
+	SyntheticServiceEntry resource.Info
+
 	// VirtualService metadata
 	VirtualService resource.Info
 
@@ -344,6 +347,9 @@ func init() {
 	Sidecar = b.Register(
 		"istio/networking/v1alpha3/sidecars",
 		"type.googleapis.com/istio.networking.v1alpha3.Sidecar")
+	SyntheticServiceEntry = b.Register(
+		"istio/networking/v1alpha3/synthetic/serviceentries",
+		"type.googleapis.com/istio.networking.v1alpha3.ServiceEntry")
 	VirtualService = b.Register(
 		"istio/networking/v1alpha3/virtualservices",
 		"type.googleapis.com/istio.networking.v1alpha3.VirtualService")

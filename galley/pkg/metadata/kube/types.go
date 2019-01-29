@@ -491,6 +491,17 @@ func init() {
 	})
 
 	b.Add(schema.ResourceSpec{
+		Kind:      "SyntheticServiceEntry",
+		ListKind:  "SyntheticServiceEntryList",
+		Singular:  "syntheticserviceentry",
+		Plural:    "syntheticserviceentries",
+		Version:   "v1alpha3",
+		Group:     "networking.istio.io",
+		Target:    metadata.Types.Get("istio/networking/v1alpha3/synthetic/serviceentries"),
+		Converter: converter.Get("identity"),
+	})
+
+	b.Add(schema.ResourceSpec{
 		Kind:      "VirtualService",
 		ListKind:  "VirtualServiceList",
 		Singular:  "virtualservice",

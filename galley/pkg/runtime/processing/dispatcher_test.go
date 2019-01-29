@@ -27,9 +27,11 @@ func TestDispatcher_Handle(t *testing.T) {
 	fh1 := &fakeHandler{}
 	fh2 := &fakeHandler{}
 	fh3 := &fakeHandler{}
+	fh4 := &fakeHandler{}
 	b.Add(emptyInfo.Collection, fh1)
 	b.Add(emptyInfo.Collection, fh2)
 	b.Add(structInfo.Collection, fh3)
+	b.AddFullSyncHandler(fh4)
 	d := b.Build()
 
 	d.Handle(addRes1V1())
@@ -44,6 +46,9 @@ func TestDispatcher_Handle(t *testing.T) {
 	if len(fh3.evts) != 0 {
 		t.Fatalf("unexpected events: %v", fh3.evts)
 	}
+	if len(fh4.evts) != 0 {
+		t.Fatalf("unexpected events: %v", fh4.evts)
+	}
 
 	d.Handle(addRes3V1())
 	if len(fh1.evts) != 2 {
@@ -52,9 +57,16 @@ func TestDispatcher_Handle(t *testing.T) {
 	if len(fh2.evts) != 2 {
 		t.Fatalf("unexpected events: %v", fh2.evts)
 	}
-
 	if len(fh3.evts) != 1 {
 		t.Fatalf("unexpected events: %v", fh3.evts)
+	}
+	if len(fh4.evts) != 0 {
+		t.Fatalf("unexpected events: %v", fh4.evts)
+	}
+
+	d.Handle(resource.FullSyncEvent)
+	if len(fh4.evts) != 1 {
+		t.Fatalf("unexpected events: %v", fh4.evts)
 	}
 }
 
