@@ -157,7 +157,7 @@ func (p *Handler) handleServiceEvent(event resource.Event) {
 		// Check to see if the service's version has changed.
 		curEntry, ok := p.services[fullName]
 		if ok && curEntry.ID.Version == entry.ID.Version {
-			scope.Debugf("Received service for the current, known version: %v", event)
+			scope.Debugf("received service for the current, known version: %v", event)
 			return
 		}
 
@@ -185,7 +185,7 @@ func (p *Handler) handleServiceEvent(event resource.Event) {
 		delete(p.mcpResources, fullName)
 		p.updateVersion()
 	default:
-		scope.Errorf("Unknown event kind: %v", event.Kind)
+		scope.Errorf("unknown event kind: %v", event.Kind)
 	}
 }
 
@@ -199,7 +199,7 @@ func (p *Handler) handleEndpointsEvent(event resource.Event) {
 		// Check to see if the version has changed.
 		curEntry, ok := p.endpoints[fullName]
 		if ok && curEntry.ID.Version == entry.ID.Version {
-			scope.Debugf("Received endpoints for the current, known version: %v", event)
+			scope.Debugf("received endpoints for the current, known version: %v", event)
 			return
 		}
 
@@ -208,7 +208,8 @@ func (p *Handler) handleEndpointsEvent(event resource.Event) {
 		// Look up the service associated with the endpoints.
 		svcEntry, ok := p.services[fullName]
 		if !ok {
-			// TODO:
+			// Wait until we get a Service before we create the ServiceEntry.
+			scope.Debugf("received endpoints before service for: %s", fullName)
 			return
 		}
 
@@ -222,10 +223,11 @@ func (p *Handler) handleEndpointsEvent(event resource.Event) {
 		p.updateVersion()
 
 	case resource.Deleted:
+		// The lifecycle of the ServiceEntry is bound to the service, so only delete the endpoints entry here.
 		delete(p.endpoints, fullName)
 		p.updateVersion()
 	default:
-		scope.Errorf("Unknown event kind: %v", event.Kind)
+		scope.Errorf("unknown event kind: %v", event.Kind)
 	}
 }
 
@@ -247,7 +249,7 @@ func (p *Handler) updateVersion() {
 	p.version++
 	monitoring.RecordStateTypeCount(collection.String(), len(p.mcpResources))
 
-	scope.Debugf("In-memory state has changed:\n%v\n", p)
+	scope.Debugf("in-memory state has changed:\n%v\n", p)
 	p.pendingEvents++
 	if p.distribute {
 		p.notifyChanged()
@@ -270,18 +272,18 @@ func (p *Handler) toMcpResource(svcEntry resource.Entry, endpoints *coreV1.Endpo
 
 	// Set the endpoints, if available.
 	if endpoints != nil {
-		se.Endpoints = convert.Endpoints(svcMeta, endpoints, p.localityStrategy)
+		se.Endpoints = convert.Endpoints(endpoints, p.localityStrategy)
 	}
 
 	body, err := types.MarshalAny(se)
 	if err != nil {
-		scope.Errorf("Error serializing proto from source e: %v:", se)
+		scope.Errorf("error serializing proto from source e: %v:", se)
 		return nil, false
 	}
 
 	createTime, err := types.TimestampProto(svcMeta.CreateTime)
 	if err != nil {
-		scope.Errorf("Error parsing resource create_time for event metadata (%v): %v", svcMeta, err)
+		scope.Errorf("error parsing resource create_time for event metadata (%v): %v", svcMeta, err)
 		return nil, false
 	}
 

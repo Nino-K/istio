@@ -84,7 +84,7 @@ func Service(svc *coreV1.ServiceSpec, metadata resource.Metadata, key resource.V
 }
 
 // Endpoints converts k8s Endpoints to networking.ServiceEntry_Endpoint resources.
-func Endpoints(serviceMeta resource.Metadata, endpoints *coreV1.Endpoints, localityStrategy locality.Strategy) []*networking.ServiceEntry_Endpoint {
+func Endpoints(endpoints *coreV1.Endpoints, localityStrategy locality.Strategy) []*networking.ServiceEntry_Endpoint {
 	out := make([]*networking.ServiceEntry_Endpoint, 0)
 	for _, subset := range endpoints.Subsets {
 
@@ -97,7 +97,7 @@ func Endpoints(serviceMeta resource.Metadata, endpoints *coreV1.Endpoints, local
 		// Convert
 		for _, address := range subset.Addresses {
 			ep := &networking.ServiceEntry_Endpoint{
-				Labels:   serviceMeta.Labels,
+				Labels:   endpoints.Labels,
 				Address:  address.IP,
 				Ports:    ports,
 				Locality: localityStrategy.GetLocalityForIP(address.IP),

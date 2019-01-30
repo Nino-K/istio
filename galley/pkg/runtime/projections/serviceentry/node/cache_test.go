@@ -40,11 +40,10 @@ var (
 )
 
 func TestBasicEvents(t *testing.T) {
-	g := NewGomegaWithT(t)
-
 	c, h := node.NewCache()
 
 	t.Run("Add", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Added,
 			Entry: entry("region1", "zone1"),
@@ -55,6 +54,7 @@ func TestBasicEvents(t *testing.T) {
 	})
 
 	t.Run("Update", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Updated,
 			Entry: entry("region1", "zone2"),
@@ -65,6 +65,7 @@ func TestBasicEvents(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Deleted,
 			Entry: entry("region1", "zone2"),

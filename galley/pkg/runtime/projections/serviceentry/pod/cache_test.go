@@ -44,11 +44,10 @@ var (
 )
 
 func TestBasicEvents(t *testing.T) {
-	g := NewGomegaWithT(t)
-
 	c, h := pod.NewCache()
 
 	t.Run("Add", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Added,
 			Entry: entry("1.2.3.4", coreV1.PodPending),
@@ -60,6 +59,7 @@ func TestBasicEvents(t *testing.T) {
 	})
 
 	t.Run("Update", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Updated,
 			Entry: entry("1.2.3.4", coreV1.PodRunning),
@@ -71,6 +71,7 @@ func TestBasicEvents(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
+		g := NewGomegaWithT(t)
 		h.Handle(resource.Event{
 			Kind:  resource.Deleted,
 			Entry: entry("1.2.3.4", coreV1.PodRunning),
@@ -81,12 +82,11 @@ func TestBasicEvents(t *testing.T) {
 }
 
 func TestInvalidPodPhase(t *testing.T) {
-	g := NewGomegaWithT(t)
-
 	c, h := pod.NewCache()
 
 	for _, phase := range []coreV1.PodPhase{coreV1.PodSucceeded, coreV1.PodFailed, coreV1.PodUnknown} {
 		t.Run(string(phase), func(t *testing.T) {
+			g := NewGomegaWithT(t)
 			h.Handle(resource.Event{
 				Kind:  resource.Added,
 				Entry: entry("1.2.3.4", phase),
