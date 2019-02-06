@@ -84,7 +84,7 @@ func TestClientSource(t *testing.T) {
 		Watcher:            h,
 		CollectionsOptions: CollectionOptionsFromSlice(test.SupportedCollections),
 		Reporter:           monitoring.NewInMemoryStatsContext(),
-		RateLimiter:        newFakeRateLimiter(),
+		RateLimiter:        test.NewFakePerConnLimiter(),
 	}
 	c := NewClient(h, options)
 

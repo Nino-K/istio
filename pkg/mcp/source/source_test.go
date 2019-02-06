@@ -248,7 +248,7 @@ func makeSourceUnderTest(w Watcher) *Source {
 		Watcher:            w,
 		CollectionsOptions: CollectionOptionsFromSlice(test.SupportedCollections),
 		Reporter:           monitoring.NewInMemoryStatsContext(),
-		RateLimiter:        newFakeRateLimiter(),
+		RateLimiter:        test.NewFakePerConnLimiter(),
 	}
 	return New(options)
 }
@@ -381,7 +381,7 @@ func TestRateLimitError(t *testing.T) {
 	h := newSourceTestHarness(t)
 	h.requestsChan <- test.MakeRequest(test.FakeType0Collection, "", codes.OK)
 
-	fakeLimiter := newFakeRateLimiter()
+	fakeLimiter := test.NewFakePerConnLimiter()
 
 	s := makeSourceUnderTest(h)
 	s.requestLimiter = fakeLimiter
@@ -392,7 +392,7 @@ func TestRateLimitError(t *testing.T) {
 	}()
 
 	expectedErr := "rate limiting went wrong"
-	fakeLimiter.waitErr <- errors.New(expectedErr)
+	fakeLimiter.WaitErr <- errors.New(expectedErr)
 
 	err := <-errC
 	if err == nil || err.Error() != expectedErr {
@@ -435,6 +435,7 @@ func TestSourceReceiveError(t *testing.T) {
 		Watcher:            h,
 		CollectionsOptions: CollectionOptionsFromSlice(test.SupportedCollections),
 		Reporter:           monitoring.NewInMemoryStatsContext(),
+		RateLimiter:        test.NewFakePerConnLimiter(),
 	}
 	// check that response fails since watch gets closed
 	s := New(options)

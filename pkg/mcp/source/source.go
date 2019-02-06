@@ -105,7 +105,7 @@ func CollectionOptionsFromSlice(names []string) []CollectionOptions {
 }
 
 // DefaultRateLimiter is a standard library rate limiter
-// with default valuse of 10ms frequency and burst size of 10 tokens
+// with default values of 10ms frequency and burst size of 10 tokens
 func DefaultRateLimiter() *rate.Limiter {
 	return rate.NewLimiter(rate.Every(10*time.Millisecond), 10)
 }
@@ -115,7 +115,7 @@ type Options struct {
 	Watcher            Watcher
 	CollectionsOptions []CollectionOptions
 	Reporter           monitoring.Reporter
-	RateLimiter        RateLimiter
+	RateLimiter        internal.ConnectionRateLimit
 }
 
 // Stream is for sending Resource messages and receiving RequestResources messages.
@@ -133,7 +133,7 @@ type Source struct {
 	nextStreamID   int64
 	reporter       monitoring.Reporter
 	connections    int64
-	requestLimiter RateLimiter
+	requestLimiter internal.ConnectionRateLimit
 }
 
 // watch maintains local push state of the most recent watch per-type.
@@ -250,7 +250,7 @@ func (s *Source) processStream(stream Stream) error {
 			if !more {
 				return con.reqError
 			}
-			if err := s.requestLimiter.Wait(stream.Context()); err != nil {
+			if err := s.requestLimiter.Wait(stream.Context(), con.String()); err != nil {
 				return err
 			}
 			if err := con.processClientRequest(req); err != nil {
@@ -267,6 +267,7 @@ func (s *Source) processStream(stream Stream) error {
 
 func (s *Source) closeConnection(con *connection) {
 	con.close()
+	s.requestLimiter.Remove(con.String())
 	s.reporter.SetStreamCount(atomic.AddInt64(&s.connections, -1))
 }
 
