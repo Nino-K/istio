@@ -58,6 +58,7 @@ type sourceTestHarness struct {
 	sendErr           error
 	recvErr           error
 	ctx               context.Context
+	cancel            context.CancelFunc
 	nonce             int
 	closeWatch        bool
 	watchResponses    map[string]*WatchResponse
@@ -66,8 +67,10 @@ type sourceTestHarness struct {
 }
 
 func newSourceTestHarness(t *testing.T) *sourceTestHarness {
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &sourceTestHarness{
-		ctx:                context.Background(),
+		ctx:                ctx,
+		cancel:             cancel,
 		t:                  t,
 		watchCreated:       make(map[string]int),
 		watchesCreatedChan: make(map[string]chan struct{}),
@@ -377,7 +380,7 @@ func TestSourceWatchClosed(t *testing.T) {
 	}
 }
 
-func TestRateLimitError(t *testing.T) {
+func TestConnRateLimit(t *testing.T) {
 	h := newSourceTestHarness(t)
 	h.requestsChan <- test.MakeRequest(test.FakeType0Collection, "", codes.OK)
 
@@ -386,17 +389,23 @@ func TestRateLimitError(t *testing.T) {
 	s := makeSourceUnderTest(h)
 	s.requestLimiter = fakeLimiter
 
-	errC := make(chan error)
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		errC <- s.processStream(h)
+		s.processStream(h)
+		wg.Done()
 	}()
+	go func() {
+		h.cancel()
+		wg.Done()
+	}()
+	wg.Wait()
 
-	expectedErr := "rate limiting went wrong"
-	fakeLimiter.WaitErr <- errors.New(expectedErr)
-
-	err := <-errC
-	if err == nil || err.Error() != expectedErr {
-		t.Errorf("Stream() => expected %v got %v", expectedErr, err)
+	if len(fakeLimiter.WaitCh) != 1 {
+		t.Error("Stream() => expected call Wait")
+	}
+	if len(fakeLimiter.CreateCh) != 1 {
+		t.Error("Stream() => expected to create a new ConnRateLimiter")
 	}
 }
 

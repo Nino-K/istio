@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	mcp "istio.io/api/mcp/v1alpha1"
+	"istio.io/istio/pkg/mcp/internal"
 	"istio.io/istio/pkg/mcp/internal/test"
 	"istio.io/istio/pkg/mcp/testing/monitoring"
 )
@@ -84,7 +85,7 @@ func TestClientSource(t *testing.T) {
 		Watcher:            h,
 		CollectionsOptions: CollectionOptionsFromSlice(test.SupportedCollections),
 		Reporter:           monitoring.NewInMemoryStatsContext(),
-		RateLimiter:        test.NewFakePerConnLimiter(),
+		RateLimiter:        internal.NewRateLimiter(time.Second*2, 5),
 	}
 	c := NewClient(h, options)
 

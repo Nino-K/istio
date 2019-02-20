@@ -14,19 +14,28 @@
 
 package test
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	"istio.io/istio/pkg/mcp/internal"
+)
 
 type FakeRateLimiter struct {
 	WaitErr chan error
+	WaitCh  chan struct{}
 }
 
 func NewFakeRateLimiter() *FakeRateLimiter {
 	return &FakeRateLimiter{
 		WaitErr: make(chan error),
+		WaitCh:  make(chan struct{}, 100),
 	}
 }
 
 func (f *FakeRateLimiter) Wait(ctx context.Context) error {
+	fmt.Println("WAIT called")
+	f.WaitCh <- struct{}{}
 	select {
 	case err := <-f.WaitErr:
 		return err
@@ -36,22 +45,23 @@ func (f *FakeRateLimiter) Wait(ctx context.Context) error {
 }
 
 type FakePerConnLimiter struct {
-	WaitErr chan error
+	fakeLimiter *FakeRateLimiter
+	CreateCh    chan struct{}
+	WaitCh      chan struct{}
 }
 
 func NewFakePerConnLimiter() *FakePerConnLimiter {
-	return &FakePerConnLimiter{
-		WaitErr: make(chan error),
+	fakeLimiter := NewFakeRateLimiter()
+	f := &FakePerConnLimiter{
+		fakeLimiter: fakeLimiter,
+		CreateCh:    make(chan struct{}, 100),
+		WaitCh:      fakeLimiter.WaitCh,
 	}
+	return f
 }
 
-func (f *FakePerConnLimiter) Wait(ctx context.Context, id string) error {
-	select {
-	case err := <-f.WaitErr:
-		return err
-	default:
-		return nil
-	}
+func (f *FakePerConnLimiter) Create() internal.RateLimit {
+	fmt.Println("CREATE called")
+	f.CreateCh <- struct{}{}
+	return f.fakeLimiter
 }
-
-func (f *FakePerConnLimiter) Remove(id string) {}
