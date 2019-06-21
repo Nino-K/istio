@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"reflect"
 	"strings"
@@ -34,16 +33,14 @@ import (
 	"github.com/gogo/protobuf/types"
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/hashicorp/go-multierror"
+	multierror "github.com/hashicorp/go-multierror"
 	prom "github.com/prometheus/client_golang/prometheus"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	mcpapi "istio.io/api/mcp/v1alpha1"
 	meshconfig "istio.io/api/mesh/v1alpha1"
-	istio_networking_v1alpha3 "istio.io/api/networking/v1alpha3"
 	"istio.io/pkg/ctrlz"
 	"istio.io/pkg/env"
 	"istio.io/pkg/filewatcher"
@@ -78,8 +75,6 @@ import (
 	"istio.io/istio/pkg/config/schemas"
 	istiokeepalive "istio.io/istio/pkg/keepalive"
 	kubelib "istio.io/istio/pkg/kube"
-	configz "istio.io/istio/pkg/mcp/configz/client"
-	"istio.io/istio/pkg/mcp/creds"
 	"istio.io/istio/pkg/mcp/monitoring"
 	"istio.io/istio/pkg/mcp/sink"
 
@@ -191,6 +186,7 @@ type PilotArgs struct {
 	MCPMaxMessageSize        int
 	MCPInitialWindowSize     int
 	MCPInitialConnWindowSize int
+	SSEAddrs                 []string
 	KeepaliveOptions         *istiokeepalive.Options
 	// ForceStop is set as true when used for testing to make the server stop quickly
 	ForceStop bool
@@ -211,17 +207,20 @@ type Server struct {
 	meshNetworks     *meshconfig.MeshNetworks
 	configController model.ConfigStoreCache
 
-	kubeClient       kubernetes.Interface
-	startFuncs       []startFunc
-	multicluster     *clusterregistry.Multicluster
-	httpServer       *http.Server
-	grpcServer       *grpc.Server
-	secureHTTPServer *http.Server
-	secureGRPCServer *grpc.Server
-	istioConfigStore model.IstioConfigStore
-	mux              *http.ServeMux
-	kubeRegistry     *controller2.Controller
-	fileWatcher      filewatcher.FileWatcher
+	kubeClient            kubernetes.Interface
+	startFuncs            []startFunc
+	multicluster          *clusterregistry.Multicluster
+	httpServer            *http.Server
+	grpcServer            *grpc.Server
+	secureHTTPServer      *http.Server
+	secureGRPCServer      *grpc.Server
+	istioConfigStore      model.IstioConfigStore
+	mux                   *http.ServeMux
+	kubeRegistry          *controller2.Controller
+	fileWatcher           filewatcher.FileWatcher
+	mcpDiscovery          *coredatamodel.MCPDiscovery
+	incrementalMcpOptions *coredatamodel.Options
+	mcpOptions            *coredatamodel.Options
 }
 
 var podNamespaceVar = env.RegisterStringVar("POD_NAMESPACE", "", "")
@@ -516,19 +515,6 @@ func (c *mockController) AppendInstanceHandler(f func(*model.ServiceInstance, mo
 func (c *mockController) Run(<-chan struct{}) {}
 
 func (s *Server) initMCPConfigController(args *PilotArgs) error {
-	clientNodeID := ""
-	collections := make([]sink.CollectionOptions, len(schemas.Istio))
-	for i, t := range schemas.Istio {
-		collections[i] = sink.CollectionOptions{Name: t.Collection, Incremental: false}
-	}
-
-	options := coredatamodel.Options{
-		DomainSuffix: args.Config.ControllerOptions.DomainSuffix,
-		ClearDiscoveryServerCache: func(configType string) {
-			s.EnvoyXdsServer.ConfigUpdate(&model.PushRequest{Full: true, ConfigTypesUpdated: map[string]struct{}{configType: {}}})
-		},
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	var clients []*sink.Client
 	var conns []*grpc.ClientConn
@@ -561,60 +547,9 @@ func (s *Server) initMCPConfigController(args *PilotArgs) error {
 			}
 		}
 
-		securityOption := grpc.WithInsecure()
-		if configSource.TlsSettings != nil &&
-			configSource.TlsSettings.Mode != istio_networking_v1alpha3.TLSSettings_DISABLE {
-			var credentialOption *creds.Options
-			switch configSource.TlsSettings.Mode {
-			case istio_networking_v1alpha3.TLSSettings_SIMPLE:
-			case istio_networking_v1alpha3.TLSSettings_MUTUAL:
-				credentialOption = &creds.Options{
-					CertificateFile:   configSource.TlsSettings.ClientCertificate,
-					KeyFile:           configSource.TlsSettings.PrivateKey,
-					CACertificateFile: configSource.TlsSettings.CaCertificates,
-				}
-			case istio_networking_v1alpha3.TLSSettings_ISTIO_MUTUAL:
-				credentialOption = &creds.Options{
-					CertificateFile:   path.Join(constants.AuthCertsPath, constants.CertChainFilename),
-					KeyFile:           path.Join(constants.AuthCertsPath, constants.KeyFilename),
-					CACertificateFile: path.Join(constants.AuthCertsPath, constants.RootCertFilename),
-				}
-			default:
-				log.Errorf("invalid tls setting mode %d", configSource.TlsSettings.Mode)
-				continue
-			}
-
-			if credentialOption == nil {
-				transportCreds := creds.CreateForClientSkipVerify()
-				securityOption = grpc.WithTransportCredentials(transportCreds)
-			} else {
-				requiredFiles := []string{credentialOption.CACertificateFile, credentialOption.KeyFile, credentialOption.CertificateFile}
-				log.Infof("Secure MCP configured. Waiting for required certificate files to become available: %v",
-					requiredFiles)
-				for len(requiredFiles) > 0 {
-					if _, err := os.Stat(requiredFiles[0]); os.IsNotExist(err) {
-						log.Infof("%v not found. Checking again in %v", requiredFiles[0], requiredMCPCertCheckFreq)
-						select {
-						case <-ctx.Done():
-							cancel()
-							return ctx.Err()
-						case <-time.After(requiredMCPCertCheckFreq):
-							// retry
-						}
-						continue
-					}
-					log.Infof("%v found", requiredFiles[0])
-					requiredFiles = requiredFiles[1:]
-				}
-
-				watcher, err := creds.WatchFiles(ctx.Done(), credentialOption)
-				if err != nil {
-					cancel()
-					return err
-				}
-				transportCreds := creds.CreateForClient(configSource.TlsSettings.Sni, watcher)
-				securityOption = grpc.WithTransportCredentials(transportCreds)
-			}
+		securityOption, err := mcpSecurityOptions(configSource, ctx, cancel)
+		if err != nil {
+			return err
 		}
 
 		keepaliveOption := grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -627,29 +562,42 @@ func (s *Server) initMCPConfigController(args *PilotArgs) error {
 		msgSizeOption := grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(args.MCPMaxMessageSize))
 
 		conn, err := grpc.DialContext(
-			ctx, configSource.Address,
-			securityOption, msgSizeOption, keepaliveOption, initialWindowSizeOption, initialConnWindowSizeOption)
+			ctx,
+			configSource.Address,
+			securityOption,
+			msgSizeOption,
+			keepaliveOption,
+			initialWindowSizeOption,
+			initialConnWindowSizeOption)
 		if err != nil {
 			log.Errorf("Unable to dial MCP Server %q: %v", configSource.Address, err)
 			cancel()
 			return err
 		}
-
-		mcpController := coredatamodel.NewController(options)
-		sinkOptions := &sink.Options{
-			CollectionOptions: collections,
-			Updater:           mcpController,
-			ID:                clientNodeID,
-			Reporter:          reporter,
-		}
-
-		cl := mcpapi.NewResourceSourceClient(conn)
-		mcpClient := sink.NewClient(cl, sinkOptions)
-		configz.Register(mcpClient)
-		clients = append(clients, mcpClient)
-
 		conns = append(conns, conn)
-		configStores = append(configStores, mcpController)
+		s.mcpController(args, conn, reporter, &clients, &configStores)
+
+		// create MCP SyntheticServiceEntryController
+		if resourceContains(configSource.SubscribedResources, meshconfig.Resource_SERVICE_REGISTRY) {
+
+			//TODO(Nino-K): https://github.com/istio/istio/issues/16976
+			args.Service.Registries = []string{string(serviceregistry.MCPRegistry)}
+			conn, err := grpc.DialContext(
+				ctx,
+				configSource.Address,
+				securityOption,
+				msgSizeOption,
+				keepaliveOption,
+				initialWindowSizeOption,
+				initialConnWindowSizeOption)
+			if err != nil {
+				log.Errorf("Unable to dial SSE MCP Server %q: %v", configSource.Address, err)
+				cancel()
+				return err
+			}
+			conns = append(conns, conn)
+			s.sseMCPController(args, conn, reporter, &clients, &configStores)
+		}
 	}
 
 	s.addStartFunc(func(stop <-chan struct{}) error {
@@ -836,7 +784,14 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
 				return err
 			}
 		case serviceregistry.MCPRegistry:
-			log.Infof("no-op: get service info from MCP ServiceEntries.")
+			if s.mcpDiscovery != nil {
+				serviceControllers.AddRegistry(
+					aggregate.Registry{
+						Name:             serviceregistry.MCPRegistry,
+						ServiceDiscovery: s.mcpDiscovery,
+						Controller:       s.mcpDiscovery,
+					})
+			}
 		default:
 			return fmt.Errorf("service registry %s is not supported", r)
 		}
@@ -913,12 +868,20 @@ func (s *Server) initDiscoveryService(args *PilotArgs) error {
 		istio_networking.NewConfigGenerator(args.Plugins),
 		s.ServiceController, s.kubeRegistry, s.configController)
 	s.EnvoyXdsServer.InitDebug(s.mux, s.ServiceController)
+
 	if s.kubeRegistry != nil {
 		// kubeRegistry may use the environment for push status reporting.
 		// TODO: maybe all registries should have this as an optional field ?
 		s.kubeRegistry.Env = environment
 		s.kubeRegistry.InitNetworkLookup(s.meshNetworks)
 		s.kubeRegistry.XDSUpdater = s.EnvoyXdsServer
+	}
+
+	if s.mcpOptions != nil {
+		s.mcpOptions.XDSUpdater = s.EnvoyXdsServer
+	}
+	if s.incrementalMcpOptions != nil {
+		s.incrementalMcpOptions.XDSUpdater = s.EnvoyXdsServer
 	}
 
 	// Implement EnvoyXdsServer grace shutdown
@@ -953,35 +916,35 @@ func (s *Server) initDiscoveryService(args *PilotArgs) error {
 			if !s.waitForCacheSync(stop) {
 				return
 			}
+		}()
 
-			log.Infof("starting discovery service at http=%s grpc=%s", listener.Addr(), grpcListener.Addr())
-			go func() {
-				if err := s.httpServer.Serve(listener); err != nil {
-					log.Warna(err)
-				}
-			}()
-			go func() {
-				if err := s.grpcServer.Serve(grpcListener); err != nil {
-					log.Warna(err)
-				}
-			}()
+		log.Infof("starting discovery service at http=%s grpc=%s", listener.Addr(), grpcListener.Addr())
+		go func() {
+			if err := s.httpServer.Serve(listener); err != nil {
+				log.Warna(err)
+			}
+		}()
+		go func() {
+			if err := s.grpcServer.Serve(grpcListener); err != nil {
+				log.Warna(err)
+			}
+		}()
 
-			go func() {
-				<-stop
-				authn_model.JwtKeyResolver.Close()
+		go func() {
+			<-stop
+			authn_model.JwtKeyResolver.Close()
 
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				err := s.httpServer.Shutdown(ctx)
-				if err != nil {
-					log.Warna(err)
-				}
-				if args.ForceStop {
-					s.grpcServer.Stop()
-				} else {
-					s.grpcServer.GracefulStop()
-				}
-			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := s.httpServer.Shutdown(ctx)
+			if err != nil {
+				log.Warna(err)
+			}
+			if args.ForceStop {
+				s.grpcServer.Stop()
+			} else {
+				s.grpcServer.GracefulStop()
+			}
 		}()
 
 		return nil

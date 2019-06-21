@@ -159,16 +159,8 @@ func syntheticServiceEntryValidator(ns string) galley.SnapshotValidatorFunc {
 			return err
 		}
 
-		// Compare Ports
+		// Compare Port
 		if err := v.Select("{.Body.ports[0]}").
-			Equals("dns", "{.name}").
-			Equals(53, "{.number}").
-			Equals("UDP", "{.protocol}").
-			Check(); err != nil {
-			return err
-		}
-
-		if err := v.Select("{.Body.ports[1]}").
 			Equals("dns-tcp", "{.name}").
 			Equals(53, "{.number}").
 			Equals("TCP", "{.protocol}").
@@ -180,7 +172,6 @@ func syntheticServiceEntryValidator(ns string) galley.SnapshotValidatorFunc {
 		if err := v.Select("{.Body.endpoints[0]}").
 			Equals("10.40.0.5", "{.address}").
 			Equals("us-central1/us-central1-a", "{.locality}").
-			Equals(53, "{.ports['dns']}").
 			Equals(53, "{.ports['dns-tcp']}").
 			Equals("kube-dns", "{.labels['k8s-app']}").
 			Equals("123", "{.labels['pod-template-hash']}").
@@ -191,7 +182,6 @@ func syntheticServiceEntryValidator(ns string) galley.SnapshotValidatorFunc {
 		if err := v.Select("{.Body.endpoints[1]}").
 			Equals("10.40.1.4", "{.address}").
 			Equals("us-central1/us-central1-a", "{.locality}").
-			Equals(53, "{.ports['dns']}").
 			Equals(53, "{.ports['dns-tcp']}").
 			Equals("kube-dns", "{.labels['k8s-app']}").
 			Equals("456", "{.labels['pod-template-hash']}").

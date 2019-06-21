@@ -175,6 +175,7 @@ func NewDiscoveryServer(
 	// Flush cached discovery responses when detecting jwt public key change.
 	authn_model.JwtKeyResolver.PushFunc = out.ClearCache
 
+	// TODO(Nino-k): remove this case once incrementalUpdate is default
 	if configCache != nil {
 		// TODO: changes should not trigger a full recompute of LDS/RDS/CDS/EDS
 		// (especially mixerclient HTTP and quota)

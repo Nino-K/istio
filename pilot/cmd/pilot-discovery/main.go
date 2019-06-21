@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"istio.io/istio/pkg/spiffe"
@@ -31,6 +32,7 @@ import (
 	"istio.io/istio/pkg/keepalive"
 	"istio.io/pkg/collateral"
 	"istio.io/pkg/ctrlz"
+	"istio.io/pkg/env"
 	"istio.io/pkg/log"
 	"istio.io/pkg/version"
 )
@@ -40,6 +42,11 @@ var (
 		CtrlZOptions:     ctrlz.DefaultOptions(),
 		KeepaliveOptions: keepalive.DefaultOption(),
 	}
+
+	sseSrvAddrs = env.RegisterStringVar(
+		"SSE_MCP_ADDRESSES",
+		"",
+		"comma separated list of all the galleys that forward incremental SyntheticServiceEntry")
 
 	loggingOptions = log.DefaultOptions()
 
@@ -64,6 +71,13 @@ var (
 
 			// Create the stop channel for all of the servers.
 			stop := make(chan struct{})
+
+			addrs := strings.Split(sseSrvAddrs.Get(), ",")
+			for _, addr := range addrs {
+				if addr != "" {
+					serverArgs.SSEAddrs = append(serverArgs.SSEAddrs, addr)
+				}
+			}
 
 			// Create the server for the discovery service.
 			discoveryServer, err := bootstrap.NewServer(serverArgs)
