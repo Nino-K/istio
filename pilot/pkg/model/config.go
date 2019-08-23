@@ -353,11 +353,15 @@ func MakeIstioStore(store ConfigStore) IstioConfigStore {
 }
 
 func (store *istioConfigStore) ServiceEntries() []Config {
-	configs, err := store.List(schemas.ServiceEntry.Type, NamespaceAll)
+	serviceEntries, err := store.List(schemas.ServiceEntry.Type, NamespaceAll)
 	if err != nil {
 		return nil
 	}
-	return configs
+	syntheticServiceEntries, err := store.List(schemas.SyntheticServiceEntry.Type, NamespaceAll)
+	if err != nil {
+		return nil
+	}
+	return append(serviceEntries, syntheticServiceEntries...)
 }
 
 // sortConfigByCreationTime sorts the list of config objects in ascending order by their creation time (if available).

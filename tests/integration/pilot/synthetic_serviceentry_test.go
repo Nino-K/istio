@@ -16,12 +16,15 @@ package pilot
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	xdsapi "github.com/envoyproxy/go-control-plane/envoy/api/v2"
+	kubeApiMeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"istio.io/istio/galley/pkg/metadata"
+	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/echoboot"
@@ -29,6 +32,7 @@ import (
 	"istio.io/istio/pkg/test/framework/components/galley"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/components/pilot"
+	"istio.io/istio/pkg/test/kube"
 	"istio.io/istio/pkg/test/util/structpath"
 )
 
@@ -40,11 +44,66 @@ const (
 	endpointUpdate testcase = "serviceEntry_endpoint_update"
 )
 
+type testParam struct {
+	env       environment.Name
+	namespace string
+	svcName   string
+	clusterIP string
+	portName  string
+	port      string
+	san       string
+	endpoints []string
+}
+
+func newTestParams(ctx framework.TestContext, ns string) (t testParam) {
+	ctx.Environment().Case(environment.Kube, func() {
+		t = testParam{
+			env:       environment.Kube,
+			namespace: ns,
+			svcName:   "hello-node",
+			clusterIP: "10.7.245.79",
+			portName:  "tcp",
+			port:      "8880",
+			san:       "default",
+		}
+	})
+	ctx.Environment().Case(environment.Native, func() {
+		t = testParam{
+			env:       environment.Native,
+			namespace: ns,
+			svcName:   "kube-dns",
+			clusterIP: "10.43.240.10",
+			portName:  "dns-tcp",
+			port:      "53",
+			san:       "kube-dns",
+			endpoints: []string{"10.40.0.5", "10.40.1.4"},
+		}
+	})
+	return t
+}
+
+func (t *testParam) update() {
+	if t.env == environment.Native {
+		t.clusterIP = "10.43.240.11"
+		return
+	}
+	t.port = "8889"
+}
+
 func TestSyntheticServiceEntry(t *testing.T) {
 	ctx := framework.NewContext(t)
 	defer ctx.Done()
 
+	//TODO: is this how we get the kubeconfig??
+	kubeConfig := os.Getenv("INTEGRATION_TEST_KUBECONFIG")
+	accessor, err := kube.NewAccessor(kubeConfig, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	ns := namespace.NewOrFail(t, ctx, namespace.Config{Prefix: "sse", Inject: true})
+	testParams := newTestParams(ctx, ns.Name())
+
 	// apply a sse
 	applyConfig(serviceEntry, ns, ctx, t)
 
@@ -54,18 +113,29 @@ func TestSyntheticServiceEntry(t *testing.T) {
 
 	collection := metadata.IstioNetworkingV1alpha3SyntheticServiceentries.Collection.String()
 
-	if err := g.WaitForSnapshot(collection, syntheticServiceEntryValidator(t, ns.Name(), expectedAnnotations)); err != nil {
+	if err := g.WaitForSnapshot(collection, syntheticServiceEntryValidator(t, expectedAnnotations, testParams)); err != nil {
 		t.Fatalf("failed waiting for %s:\n%v\n", collection, err)
 	}
 
+	ports := []echo.Port{
+		{
+			Name:     "http",
+			Protocol: protocol.HTTP,
+		},
+		{
+			Name:     "tcp",
+			Protocol: protocol.TCP,
+		},
+	}
 	var client echo.Instance
 	echoboot.NewBuilderOrFail(t, ctx).
 		With(&client, echo.Config{
-			Domain:    "testns.cluster.local",
-			Service:   "echo",
-			Namespace: ns,
-			Pilot:     p,
-			Galley:    g,
+			Ports:               ports,
+			Service:             "echo",
+			Namespace:           ns,
+			Pilot:               p,
+			Galley:              g,
+			IncludeInboundPorts: "*",
 		}).BuildOrFail(t)
 
 	nodeID := client.WorkloadsOrFail(t)[0].Sidecar().NodeID()
@@ -75,25 +145,36 @@ func TestSyntheticServiceEntry(t *testing.T) {
 	p.WatchDiscoveryOrFail(t, time.Second*10,
 		func(response *xdsapi.DiscoveryResponse) (b bool, e error) {
 			validator := structpath.ForProto(response)
-			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", 53).Check() != nil {
+			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check() != nil {
 				return false, nil
 			}
-			validateSse(t, validator, "10.43.240.10")
-			verifyEndpoint(t, client, []string{"10.40.0.5", "10.40.1.4"}, ns.Name())
+			validateSse(t, validator, testParams)
+			endpoint := getEndpoints(ctx, t, testParams, accessor)
+			// wait for the new instance to become ready
+			if len(endpoint) == 0 {
+				return false, nil
+			}
+			verifyEndpoints(t, client, testParams, endpoint)
 			return true, nil
 		})
 
 	// update the service
 	applyConfig(serviceUpdate, ns, ctx, t)
+	testParams.update()
 
 	p.WatchDiscoveryOrFail(t, time.Second*10,
 		func(response *xdsapi.DiscoveryResponse) (b bool, e error) {
 			validator := structpath.ForProto(response)
-			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", 53).Check() != nil {
+			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check() != nil {
 				return false, nil
 			}
-			validateSse(t, validator, "10.43.240.11")
-			verifyEndpoint(t, client, []string{"10.40.0.5", "10.40.1.4"}, ns.Name())
+			validateSse(t, validator, testParams)
+			endpoint := getEndpoints(ctx, t, testParams, accessor)
+			// wait for the new instance to become ready
+			if len(endpoint) == 0 {
+				return false, nil
+			}
+			verifyEndpoints(t, client, testParams, endpoint)
 			return true, nil
 		})
 
@@ -103,19 +184,39 @@ func TestSyntheticServiceEntry(t *testing.T) {
 	p.WatchDiscoveryOrFail(t, time.Second*10,
 		func(response *xdsapi.DiscoveryResponse) (b bool, e error) {
 			validator := structpath.ForProto(response)
-			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", 53).Check() != nil {
+			if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check() != nil {
 				return false, nil
 			}
-			validateSse(t, validator, "10.43.240.11")
-			verifyEndpoint(t, client, []string{"10.40.0.6", "10.40.1.4"}, ns.Name())
+			validateSse(t, validator, testParams)
+			endpoints := getEndpoints(ctx, t, testParams, accessor)
+			// wait for the new replica to become ready
+			if len(endpoints) != 2 {
+				return false, nil
+			}
+			verifyEndpoints(t, client, testParams, endpoints)
 			return true, nil
 		})
 
-	// check versionInfo
-	verifyVersionInfo(t, client, "10.43.240.11_53", "/3")
+	// check versionInfo when running native
+	verifyVersionInfo(t, client, testParams, "/3")
 }
 
-func verifyEndpoint(t *testing.T, c echo.Instance, endpoints []string, nsName string) {
+func getEndpoints(ctx framework.TestContext, t *testing.T, params testParam, accessor *kube.Accessor) (addresses []string) {
+	env := ctx.Environment().EnvironmentName()
+	if env == environment.Native {
+		return params.endpoints
+	}
+	eps, err := accessor.GetEndpoints(params.namespace, params.svcName, kubeApiMeta.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, addr := range eps.Subsets[0].Addresses {
+		addresses = append(addresses, addr.IP)
+	}
+	return addresses
+}
+
+func verifyEndpoints(t *testing.T, c echo.Instance, params testParam, endpoints []string) {
 	workloads, _ := c.Workloads()
 	for _, w := range workloads {
 		if w.Sidecar() != nil {
@@ -125,12 +226,12 @@ func verifyEndpoint(t *testing.T, c echo.Instance, endpoints []string, nsName st
 			}
 			validator := structpath.ForProto(msg)
 			for _, endpoint := range endpoints {
-				t.Run(fmt.Sprintf("verify endpoints for outbound|53||kube-dns.%s.svc.cluster.local", nsName), func(t *testing.T) {
+				t.Run(fmt.Sprintf("verify endpoints for outbound|%s||%s.%s.svc.cluster.local", params.port, params.svcName, params.namespace), func(t *testing.T) {
 					validator.
-						Select("{.clusterStatuses[?(@.name=='%v')]}", fmt.Sprintf("outbound|53||kube-dns.%s.svc.cluster.local", nsName)).
+						Select("{.clusterStatuses[?(@.name=='%v')]}", fmt.Sprintf("outbound|%s||%s.%s.svc.cluster.local", params.port, params.svcName, params.namespace)).
 						Equals("true", "{.addedViaApi}").
 						ContainSubstring(endpoint, "{.hostStatuses}").
-						ContainSubstring("53", "{.hostStatuses}").
+						ContainSubstring(params.port, "{.hostStatuses}").
 						ContainSubstring("HEALTHY", "{.hostStatuses}").
 						CheckOrFail(t)
 				})
@@ -139,66 +240,64 @@ func verifyEndpoint(t *testing.T, c echo.Instance, endpoints []string, nsName st
 	}
 }
 
-func verifyVersionInfo(t *testing.T, c echo.Instance, clusterName, svcVersion string) {
-	workloads, _ := c.Workloads()
-	for _, w := range workloads {
-		if w.Sidecar() != nil {
-			cfg, err := w.Sidecar().Config()
-			if err != nil {
-				t.Fatal(err)
+func verifyVersionInfo(t *testing.T, c echo.Instance, params testParam, svcVersion string) {
+	if params.env == environment.Native {
+		workloads, _ := c.Workloads()
+		for _, w := range workloads {
+			if w.Sidecar() != nil {
+				cfg, err := w.Sidecar().Config()
+				if err != nil {
+					t.Fatal(err)
+				}
+				clusterName := fmt.Sprintf("%s_%s", params.clusterIP, params.port)
+				validator := structpath.ForProto(cfg)
+				t.Run(fmt.Sprintf("verify versionInfo for cluster %s", clusterName), func(t *testing.T) {
+					validator.
+						Select("{.configs[*].dynamicActiveListeners[?(@.listener.name == '%s')]}", clusterName).
+						ContainSubstring(svcVersion, "{.versionInfo}").
+						CheckOrFail(t)
+				})
 			}
-			validator := structpath.ForProto(cfg)
-			t.Run(fmt.Sprintf("verify versionInfo for cluster %s", clusterName), func(t *testing.T) {
-				validator.
-					Select("{.configs[*].dynamicActiveListeners[?(@.listener.name == '%s')]}", clusterName).
-					ContainSubstring(svcVersion, "{.versionInfo}").
-					CheckOrFail(t)
-			})
 		}
 	}
 }
 
 func applyConfig(testName testcase, namespace namespace.Instance, ctx framework.TestContext, t *testing.T) {
-	// apply service and deployment in k8s
 	var resources []string
 	ctx.Environment().Case(environment.Kube, func() {
 		switch testName {
 		case serviceEntry:
 			resources = []string{
-				"testdata/deployment.yaml",
-				"testdata/service.yaml"}
+				"testdata/kube/service.yaml",
+				"testdata/kube/deployment.yaml"}
 		case serviceUpdate:
 			resources = []string{
-				"testdata/deployment.yaml",
-				"testdata/service_update.yaml"}
+				"testdata/kube/service_update.yaml"}
 		case endpointUpdate:
-			// TODO: how to test endpoint changes in k8s since can't apply endpoint
 			resources = []string{
-				"testdata/deployment.yaml",
-				"testdata/service_update.yaml"}
+				"testdata/kube/deployment_update.yaml"}
 		}
 	})
-	// apply all resources in native
 	ctx.Environment().Case(environment.Native, func() {
 		switch testName {
 		case serviceEntry:
 			resources = []string{
-				"testdata/nodes.yaml",
-				"testdata/pods.yaml",
-				"testdata/service.yaml",
-				"testdata/endpoints.yaml"}
+				"testdata/native/nodes.yaml",
+				"testdata/native/pods.yaml",
+				"testdata/native/service.yaml",
+				"testdata/native/endpoints.yaml"}
 		case serviceUpdate:
 			resources = []string{
-				"testdata/nodes.yaml",
-				"testdata/pods.yaml",
-				"testdata/service_update.yaml",
-				"testdata/endpoints.yaml"}
+				"testdata/native/nodes.yaml",
+				"testdata/native/pods.yaml",
+				"testdata/native/service_update.yaml",
+				"testdata/native/endpoints.yaml"}
 		case endpointUpdate:
 			resources = []string{
-				"testdata/nodes.yaml",
-				"testdata/pods.yaml",
-				"testdata/service_update.yaml",
-				"testdata/endpoint_update.yaml"}
+				"testdata/native/nodes.yaml",
+				"testdata/native/pods.yaml",
+				"testdata/native/service_update.yaml",
+				"testdata/native/endpoint_update.yaml"}
 		}
 	})
 	for _, config := range resources {
@@ -208,15 +307,13 @@ func applyConfig(testName testcase, namespace namespace.Instance, ctx framework.
 	}
 }
 
-func validateSse(t *testing.T, response *structpath.Instance, clusterIP string) {
+func validateSse(t *testing.T, response *structpath.Instance, params testParam) {
 	t.Run("SynthetiServiceEntry-listener", func(t *testing.T) {
 		response.
-			Select("{.resources[?(@.address.socketAddress.portValue==53)]}").
-			Equals(fmt.Sprintf("%s_53", clusterIP), "{.name}").
-			Equals(clusterIP, "{.address.socketAddress.address}").
-			Equals("envoy.tcp_proxy", "{.filterChains[0].filters[*].name}").
-			ContainSubstring("outbound|53||kube-dns.sse", "{.filterChains[0].filters[0].config.cluster}").
-			ContainSubstring("outbound|53||kube-dns.sse", "{.filterChains[0].filters[0].config.stat_prefix}").
+			Select("{.resources[?(@.address.socketAddress.portValue==%s)]}", params.port).
+			Equals(fmt.Sprintf("%s_%s", params.clusterIP, params.port), "{.name}").
+			Equals(params.clusterIP, "{.address.socketAddress.address}").
+			ContainSubstring(fmt.Sprintf("outbound|%s||%s", params.port, params.svcName), "{.filterChains[0]}").
 			CheckOrFail(t)
 	})
 }
@@ -227,58 +324,34 @@ func annotationsExist(t *testing.T, annos []string, instance *structpath.Instanc
 	}
 }
 
-func syntheticServiceEntryValidator(t *testing.T, ns string, annotations []string) galley.SnapshotValidatorFunc {
-	return galley.NewSingleObjectSnapshotValidator(ns, func(ns string, actual *galley.SnapshotObject) error {
+func syntheticServiceEntryValidator(t *testing.T, annotations []string, params testParam) galley.SnapshotValidatorFunc {
+	return galley.NewSingleObjectSnapshotValidator(params.namespace, func(ns string, actual *galley.SnapshotObject) error {
 		v := structpath.ForProto(actual)
+		// check for svc and endpoint version annotations
+		annotationsExist(t, annotations, v)
 		if err := v.Equals(metadata.IstioNetworkingV1alpha3SyntheticServiceentries.TypeURL.String(), "{.TypeURL}").
-			Equals(fmt.Sprintf("%s/kube-dns", ns), "{.Metadata.name}").
+			Equals(fmt.Sprintf("%s/%s", params.namespace, params.svcName), "{.Metadata.name}").
 			Check(); err != nil {
 			return err
 		}
-
-		annotationsExist(t, annotations, v)
-
 		// Compare the body
 		if err := v.Select("{.Body}").
-			Equals("10.43.240.10", "{.addresses[0]}").
-			Equals(fmt.Sprintf("kube-dns.%s.svc.cluster.local", ns), "{.hosts[0]}").
+			Equals(params.clusterIP, "{.addresses[0]}").
+			Equals(fmt.Sprintf("%s.%s.svc.cluster.local", params.svcName, params.namespace), "{.hosts[0]}").
 			Equals(1, "{.location}").
 			Equals(1, "{.resolution}").
-			Equals(fmt.Sprintf("spiffe://cluster.local/ns/%s/sa/kube-dns", ns), "{.subject_alt_names[0]}").
+			Equals(fmt.Sprintf("spiffe://cluster.local/ns/%s/sa/%s", params.namespace, params.san), "{.subject_alt_names[0]}").
 			Check(); err != nil {
 			return err
 		}
-
 		// Compare Port
 		if err := v.Select("{.Body.ports[0]}").
-			Equals("dns-tcp", "{.name}").
-			Equals(53, "{.number}").
+			Equals(params.portName, "{.name}").
+			Equals(params.port, "{.number}").
 			Equals("TCP", "{.protocol}").
 			Check(); err != nil {
 			return err
 		}
-
-		// Compare Endpoints
-		if err := v.Select("{.Body.endpoints[0]}").
-			Equals("10.40.0.5", "{.address}").
-			Equals("us-central1/us-central1-a", "{.locality}").
-			Equals(53, "{.ports['dns-tcp']}").
-			Equals("kube-dns", "{.labels['k8s-app']}").
-			Equals("123", "{.labels['pod-template-hash']}").
-			Check(); err != nil {
-			return err
-		}
-
-		if err := v.Select("{.Body.endpoints[1]}").
-			Equals("10.40.1.4", "{.address}").
-			Equals("us-central1/us-central1-a", "{.locality}").
-			Equals(53, "{.ports['dns-tcp']}").
-			Equals("kube-dns", "{.labels['k8s-app']}").
-			Equals("456", "{.labels['pod-template-hash']}").
-			Check(); err != nil {
-			return err
-		}
-
 		return nil
 	})
 }
