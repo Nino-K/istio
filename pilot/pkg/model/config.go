@@ -357,11 +357,16 @@ func (store *istioConfigStore) ServiceEntries() []Config {
 	if err != nil {
 		return nil
 	}
-	syntheticServiceEntries, err := store.List(schemas.SyntheticServiceEntry.Type, NamespaceAll)
-	if err != nil {
-		return nil
+	supportedTypes := store.ConfigDescriptor()
+	if _, ok := supportedTypes.GetByType(schemas.SyntheticServiceEntry.Type); ok {
+		syntheticServiceEntries, err := store.List(schemas.SyntheticServiceEntry.Type, NamespaceAll)
+		if err != nil {
+			return nil
+		}
+		return append(serviceEntries, syntheticServiceEntries...)
+
 	}
-	return append(serviceEntries, syntheticServiceEntries...)
+	return serviceEntries
 }
 
 // sortConfigByCreationTime sorts the list of config objects in ascending order by their creation time (if available).

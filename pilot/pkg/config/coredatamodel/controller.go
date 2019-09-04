@@ -44,6 +44,7 @@ type CoreDataModel interface {
 
 // Options stores the configurable attributes of a Control
 type Options struct {
+	ClusterID    string
 	DomainSuffix string
 	XDSUpdater   model.XDSUpdater
 }
@@ -199,7 +200,13 @@ func (c *Controller) Apply(change *sink.Change) error {
 	if descriptor.Type == schemas.ServiceEntry.Type {
 		c.serviceEntryEvents(innerStore, prevStore)
 	} else {
-		c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{Full: true})
+		if c.options.XDSUpdater != nil {
+			c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{
+				Full:               true,
+				ConfigTypesUpdated: map[string]struct{}{descriptor.Type: {}},
+			})
+
+		}
 	}
 
 	return nil

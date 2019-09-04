@@ -5,7 +5,6 @@ metadata:
     app: hello-node
   name: hello-node
 spec:
-  clusterIP: 10.7.245.79
   ports:
   - name: tcp
     port: 8880
@@ -13,5 +12,3 @@ spec:
     targetPort: 8880
   selector:
     app: hello-node
-  sessionAffinity: None
-  type: ClusterIP

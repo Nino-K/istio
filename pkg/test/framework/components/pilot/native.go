@@ -113,14 +113,17 @@ func newNative(ctx resource.Context, cfg Config) (Instance, error) {
 	if bootstrapArgs.MeshConfig == nil {
 		bootstrapArgs.MeshConfig = &meshapi.MeshConfig{}
 	}
-	galleyHostPort := cfg.Galley.Address()[6:]
-	// Set as MCP address, note needs to strip 'tcp://' from the address prefix
-	bootstrapArgs.MeshConfig.ConfigSources = []*meshapi.ConfigSource{
-		{Address: galleyHostPort},
+	if len(cfg.MeshConfig.ConfigSources) == 0 {
+		galleyHostPort := cfg.Galley.Address()[6:]
+		// Set as MCP address, note needs to strip 'tcp://' from the address prefix
+		bootstrapArgs.MeshConfig.ConfigSources = []*meshapi.ConfigSource{
+			{
+				Address: galleyHostPort,
+			},
+		}
+
 	}
 	bootstrapArgs.MCPMaxMessageSize = bootstrap.DefaultMCPMaxMsgSize
-
-	bootstrapArgs.SSEAddrs = []string{galleyHostPort}
 
 	var err error
 	// Create the server for the discovery service.

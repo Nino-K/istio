@@ -248,7 +248,9 @@ func (c *SyntheticServiceEntryController) configStoreUpdate(resources []*sink.Ob
 	c.configStoreMu.Unlock()
 
 	if svcChanged {
-		c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{Full: true})
+		if c.options.XDSUpdater != nil {
+			c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{Full: true})
+		}
 	}
 }
 
@@ -299,7 +301,7 @@ func (c *SyntheticServiceEntryController) edsUpdate(config *model.Config) error 
 	}
 	istioEndpoints := convertEndpoints(se, config.Name, config.Namespace)
 	hostname := hostName(config.Name, config.Namespace, c.options.DomainSuffix)
-	return c.options.XDSUpdater.EDSUpdate("MCP", hostname, config.Namespace, istioEndpoints)
+	return c.options.XDSUpdater.EDSUpdate(c.options.ClusterID, hostname, config.Namespace, istioEndpoints)
 }
 
 func (c *SyntheticServiceEntryController) configExist(metadataName string) *model.Config {

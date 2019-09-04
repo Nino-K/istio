@@ -62,7 +62,8 @@ func (f *FakeXdsUpdater) WorkloadUpdate(id string, labels map[string]string, ann
 
 func TestIncrementalControllerHasSynced(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 	g.Expect(controller.HasSynced()).To(gomega.BeFalse())
 
@@ -83,7 +84,8 @@ func TestIncrementalControllerHasSynced(t *testing.T) {
 
 func TestIncrementalControllerConfigDescriptor(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	descriptor := controller.ConfigDescriptor()
@@ -93,7 +95,8 @@ func TestIncrementalControllerConfigDescriptor(t *testing.T) {
 
 func TestIncrementalControllerListInvalidType(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	c, err := controller.List("gateway", "some-phony-name-space")
@@ -104,7 +107,8 @@ func TestIncrementalControllerListInvalidType(t *testing.T) {
 
 func TestIncrementalControllerListCorrectTypeNoData(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	c, err := controller.List(schemas.SyntheticServiceEntry.Type, "some-phony-name-space")
@@ -114,7 +118,8 @@ func TestIncrementalControllerListCorrectTypeNoData(t *testing.T) {
 
 func TestIncrementalControllerListAllNameSpace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	syntheticServiceEntry2 := proto.Clone(syntheticServiceEntry1).(*networking.ServiceEntry)
@@ -158,7 +163,8 @@ func TestIncrementalControllerListAllNameSpace(t *testing.T) {
 
 func TestIncrementalControllerListSpecificNameSpace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	syntheticServiceEntry2 := proto.Clone(syntheticServiceEntry1).(*networking.ServiceEntry)
@@ -205,7 +211,8 @@ func TestIncrementalControllerListSpecificNameSpace(t *testing.T) {
 
 func TestIncrementalControllerApplyInvalidType(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message := convertToResource(g,
@@ -226,7 +233,8 @@ func TestIncrementalControllerApplyInvalidType(t *testing.T) {
 
 func TestIncrementalControllerApplyMetadataNameIncludesNamespace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -254,7 +262,8 @@ func TestIncrementalControllerApplyMetadataNameWithoutNamespace(t *testing.T) {
 	fx := NewFakeXDS()
 	fx.EDSErr <- nil
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message0 := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -295,7 +304,8 @@ func TestIncrementalControllerApplyMetadataNameWithoutNamespace(t *testing.T) {
 
 func TestIncrementalControllerApplyChangeNoObjects(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -328,7 +338,8 @@ func TestIncrementalControllerApplyChangeNoObjects(t *testing.T) {
 
 func TestIncrementalControllerApplyInvalidResource(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	se := proto.Clone(syntheticServiceEntry1).(*networking.ServiceEntry)
@@ -352,7 +363,8 @@ func TestIncrementalControllerApplyInvalidResource(t *testing.T) {
 
 func TestIncrementalControllerApplyInvalidResource_BadTimestamp(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message0 := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -379,7 +391,8 @@ func TestApplyNonIncrementalChange(t *testing.T) {
 
 	fx := NewFakeXDS()
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -425,7 +438,8 @@ func TestApplyNonIncrementalAnnotations(t *testing.T) {
 	fx := NewFakeXDS()
 	fx.EDSErr <- nil
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 	message := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
 
@@ -495,7 +509,8 @@ func TestApplyIncrementalChangeRemove(t *testing.T) {
 
 	fx := NewFakeXDS()
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message0 := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -573,7 +588,8 @@ func TestApplyIncrementalChange(t *testing.T) {
 
 	fx := NewFakeXDS()
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message0 := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)
@@ -631,7 +647,8 @@ func TestApplyIncrementalChangesAnnotations(t *testing.T) {
 	fx := NewFakeXDS()
 	fx.EDSErr <- nil
 	testControllerOptions.XDSUpdater = fx
-	d := coredatamodel.NewMCPDiscovery()
+	options := &coredatamodel.DiscoveryOptions{}
+	d := coredatamodel.NewMCPDiscovery(options)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions, d)
 
 	message := convertToResource(g, schemas.SyntheticServiceEntry.MessageName, syntheticServiceEntry0)

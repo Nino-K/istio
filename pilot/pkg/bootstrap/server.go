@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"reflect"
 	"strings"
@@ -40,7 +41,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
+	mcpapi "istio.io/api/mcp/v1alpha1"
 	meshconfig "istio.io/api/mesh/v1alpha1"
+	istio_networking_v1alpha3 "istio.io/api/networking/v1alpha3"
 	"istio.io/pkg/ctrlz"
 	"istio.io/pkg/env"
 	"istio.io/pkg/filewatcher"
@@ -75,6 +78,8 @@ import (
 	"istio.io/istio/pkg/config/schemas"
 	istiokeepalive "istio.io/istio/pkg/keepalive"
 	kubelib "istio.io/istio/pkg/kube"
+	configz "istio.io/istio/pkg/mcp/configz/client"
+	"istio.io/istio/pkg/mcp/creds"
 	"istio.io/istio/pkg/mcp/monitoring"
 	"istio.io/istio/pkg/mcp/sink"
 
@@ -186,7 +191,6 @@ type PilotArgs struct {
 	MCPMaxMessageSize        int
 	MCPInitialWindowSize     int
 	MCPInitialConnWindowSize int
-	SSEAddrs                 []string
 	KeepaliveOptions         *istiokeepalive.Options
 	// ForceStop is set as true when used for testing to make the server stop quickly
 	ForceStop bool
@@ -218,6 +222,7 @@ type Server struct {
 	mux                   *http.ServeMux
 	kubeRegistry          *controller2.Controller
 	fileWatcher           filewatcher.FileWatcher
+	discoveryOptions      *coredatamodel.DiscoveryOptions
 	mcpDiscovery          *coredatamodel.MCPDiscovery
 	incrementalMcpOptions *coredatamodel.Options
 	mcpOptions            *coredatamodel.Options
@@ -640,6 +645,133 @@ func (s *Server) initMCPConfigController(args *PilotArgs) error {
 	return nil
 }
 
+func resourceContains(resources []meshconfig.Resource, resource meshconfig.Resource) bool {
+	for _, r := range resources {
+		if r == resource {
+			return true
+		}
+	}
+	return false
+}
+
+func mcpSecurityOptions(configSource *meshconfig.ConfigSource, ctx context.Context, cancel context.CancelFunc) (grpc.DialOption, error) {
+	securityOption := grpc.WithInsecure()
+	if configSource.TlsSettings != nil &&
+		configSource.TlsSettings.Mode != istio_networking_v1alpha3.TLSSettings_DISABLE {
+		var credentialOption *creds.Options
+		switch configSource.TlsSettings.Mode {
+		case istio_networking_v1alpha3.TLSSettings_SIMPLE:
+		case istio_networking_v1alpha3.TLSSettings_MUTUAL:
+			credentialOption = &creds.Options{
+				CertificateFile:   configSource.TlsSettings.ClientCertificate,
+				KeyFile:           configSource.TlsSettings.PrivateKey,
+				CACertificateFile: configSource.TlsSettings.CaCertificates,
+			}
+		case istio_networking_v1alpha3.TLSSettings_ISTIO_MUTUAL:
+			credentialOption = &creds.Options{
+				CertificateFile:   path.Join(constants.AuthCertsPath, constants.CertChainFilename),
+				KeyFile:           path.Join(constants.AuthCertsPath, constants.KeyFilename),
+				CACertificateFile: path.Join(constants.AuthCertsPath, constants.RootCertFilename),
+			}
+		default:
+			log.Errorf("invalid tls setting mode %d", configSource.TlsSettings.Mode)
+		}
+
+		if credentialOption == nil {
+			transportCreds := creds.CreateForClientSkipVerify()
+			securityOption = grpc.WithTransportCredentials(transportCreds)
+		} else {
+			requiredFiles := []string{
+				credentialOption.CACertificateFile,
+				credentialOption.KeyFile,
+				credentialOption.CertificateFile}
+			log.Infof("Secure MCP configured. Waiting for required certificate files to become available: %v",
+				requiredFiles)
+			for len(requiredFiles) > 0 {
+				if _, err := os.Stat(requiredFiles[0]); os.IsNotExist(err) {
+					log.Infof("%v not found. Checking again in %v", requiredFiles[0], requiredMCPCertCheckFreq)
+					select {
+					case <-ctx.Done():
+						cancel()
+						return nil, ctx.Err()
+					case <-time.After(requiredMCPCertCheckFreq):
+						// retry
+					}
+					continue
+				}
+				log.Infof("%v found", requiredFiles[0])
+				requiredFiles = requiredFiles[1:]
+			}
+
+			watcher, err := creds.WatchFiles(ctx.Done(), credentialOption)
+			if err != nil {
+				cancel()
+				return nil, err
+			}
+			transportCreds := creds.CreateForClient(configSource.TlsSettings.Sni, watcher)
+			securityOption = grpc.WithTransportCredentials(transportCreds)
+		}
+	}
+	return securityOption, nil
+}
+
+func (s *Server) mcpController(args *PilotArgs, conn *grpc.ClientConn, reporter *monitoring.StatsContext, clients *[]*sink.Client, configStores *[]model.ConfigStoreCache) {
+	clientNodeID := ""
+	var collections []sink.CollectionOptions
+	for _, c := range schemas.Istio {
+		// do not register SSEs for this controller as there is a dedicated controller
+		if c.Collection == schemas.SyntheticServiceEntry.Collection {
+			continue
+		}
+		collections = append(collections, sink.CollectionOptions{c.Collection, false})
+	}
+	s.mcpOptions = &coredatamodel.Options{
+		DomainSuffix: args.Config.ControllerOptions.DomainSuffix,
+	}
+
+	mcpController := coredatamodel.NewController(s.mcpOptions)
+	sinkOptions := &sink.Options{
+		CollectionOptions: collections,
+		Updater:           mcpController,
+		ID:                clientNodeID,
+		Reporter:          reporter,
+	}
+
+	cl := mcpapi.NewResourceSourceClient(conn)
+	mcpClient := sink.NewClient(cl, sinkOptions)
+	configz.Register(mcpClient)
+	*clients = append(*clients, mcpClient)
+	*configStores = append(*configStores, mcpController)
+}
+func (s *Server) sseMCPController(args *PilotArgs, conn *grpc.ClientConn, reporter *monitoring.StatsContext, clients *[]*sink.Client, configStores *[]model.ConfigStoreCache) {
+	clientNodeID := ""
+	s.discoveryOptions = &coredatamodel.DiscoveryOptions{
+		DomainSuffix: args.Config.ControllerOptions.DomainSuffix,
+	}
+	s.mcpDiscovery = coredatamodel.NewMCPDiscovery(s.discoveryOptions)
+	s.mcpDiscovery.InitNetworkLookup(s.meshNetworks)
+	s.incrementalMcpOptions = &coredatamodel.Options{
+		DomainSuffix: args.Config.ControllerOptions.DomainSuffix,
+	}
+	controller := coredatamodel.NewSyntheticServiceEntryController(s.incrementalMcpOptions, s.mcpDiscovery)
+	incrementalSinkOptions := &sink.Options{
+		CollectionOptions: []sink.CollectionOptions{
+			{
+				Name:        schemas.SyntheticServiceEntry.Collection,
+				Incremental: true,
+			},
+		},
+		Updater:  controller,
+		ID:       clientNodeID,
+		Reporter: reporter,
+	}
+	incSrcClient := mcpapi.NewResourceSourceClient(conn)
+	incMcpClient := sink.NewClient(incSrcClient, incrementalSinkOptions)
+	configz.Register(incMcpClient)
+	*clients = append(*clients, incMcpClient)
+	*configStores = append(*configStores, controller)
+}
+
 // initConfigController creates the config controller in the pilotConfig.
 func (s *Server) initConfigController(args *PilotArgs) error {
 	if len(s.mesh.ConfigSources) > 0 {
@@ -881,7 +1013,12 @@ func (s *Server) initDiscoveryService(args *PilotArgs) error {
 		s.mcpOptions.XDSUpdater = s.EnvoyXdsServer
 	}
 	if s.incrementalMcpOptions != nil {
+		clusterID := args.Config.ControllerOptions.ClusterID
 		s.incrementalMcpOptions.XDSUpdater = s.EnvoyXdsServer
+		s.incrementalMcpOptions.ClusterID = clusterID
+		s.discoveryOptions.XDSUpdater = s.EnvoyXdsServer
+		s.discoveryOptions.Env = environment
+		s.discoveryOptions.ClusterID = clusterID
 	}
 
 	// Implement EnvoyXdsServer grace shutdown

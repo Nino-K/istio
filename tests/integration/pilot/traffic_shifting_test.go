@@ -24,7 +24,7 @@ import (
 	"istio.io/istio/pkg/test/framework/components/environment"
 
 	envoyAdmin "github.com/envoyproxy/go-control-plane/envoy/admin/v2alpha"
-	"github.com/hashicorp/go-multierror"
+	multierror "github.com/hashicorp/go-multierror"
 
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/test/echo/client"
@@ -121,7 +121,7 @@ func TestTrafficShifting(t *testing.T) {
 						v[3],
 					}
 
-					deployment := tmpl.EvaluateOrFail(t, file.AsStringOrFail(t, "testdata/traffic-shifting.yaml"), vsc)
+					deployment := tmpl.EvaluateOrFail(t, file.AsStringOrFail(t, "traffic-shifting.yaml"), vsc)
 					g.ApplyConfigOrFail(t, ns, deployment)
 
 					workloads, err := instances[0].Workloads()

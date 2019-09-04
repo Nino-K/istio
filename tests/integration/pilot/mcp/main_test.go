@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pilot
+package mcp
 
 import (
 	"testing"
 
+	meshconfig "istio.io/api/mesh/v1alpha1"
+	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/environment"
 	"istio.io/istio/pkg/test/framework/components/galley"
@@ -35,19 +37,36 @@ var (
 // If a test requires a custom install it should go into its own package, otherwise it should go
 // here to reuse a single install across tests.
 func TestMain(m *testing.M) {
+	meshCfg := mesh.DefaultMeshConfig()
 	framework.
-		NewSuite("pilot_test", m).
-		SetupOnEnv(environment.Kube, istio.Setup(&i, nil)).
+		NewSuite("mcp_test", m).
+		SetupOnEnv(environment.Kube, istio.Setup(&i, setupConfig)).
 		Setup(func(ctx resource.Context) (err error) {
 			if g, err = galley.New(ctx, galley.Config{}); err != nil {
 				return err
 			}
+			galleyHostPort := g.Address()[6:]
+			meshCfg.ConfigSources = []*meshconfig.ConfigSource{
+				{
+					Address:             galleyHostPort,
+					SubscribedResources: []meshconfig.Resource{meshconfig.Resource_SERVICE_REGISTRY},
+				},
+			}
 			if p, err = pilot.New(ctx, pilot.Config{
-				Galley: g,
+				Galley:     g,
+				MeshConfig: &meshCfg,
 			}); err != nil {
 				return err
 			}
 			return nil
 		}).
 		Run()
+}
+
+func setupConfig(cfg *istio.Config) {
+	if cfg == nil {
+		return
+	}
+	cfg.Values["galley.enableServiceDiscovery"] = "true"
+	cfg.Values["pilot.configSource.subscribedResources"] = "SERVICE_REGISTRY"
 }
