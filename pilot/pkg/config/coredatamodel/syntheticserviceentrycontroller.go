@@ -101,9 +101,12 @@ func (c *SyntheticServiceEntryController) Apply(change *sink.Change) error {
 	if change.Collection != schemas.SyntheticServiceEntry.Collection {
 		return fmt.Errorf("apply: type not supported %s", change.Collection)
 	}
+	// Apply is getting called with no changes!!
+	if len(change.Objects) == 0 {
+		return nil
+	}
 
 	defer atomic.AddUint32(&c.synced, 1)
-
 	if change.Incremental {
 		// removed first
 		c.removeConfig(change.Removed)
@@ -213,13 +216,18 @@ func (c *SyntheticServiceEntryController) convertToConfig(obj *sink.Object) (con
 }
 
 func (c *SyntheticServiceEntryController) configStoreUpdate(resources []*sink.Object) {
+	fmt.Println("----------------configStoreUpdate--------------")
 	svcChanged := c.isFullUpdateRequired(resources)
+	fmt.Println("SVC change ", svcChanged)
+	fmt.Println(len(resources))
 	configs := make(map[string]map[string]*model.Config)
 	for _, obj := range resources {
 		conf, err := c.convertToConfig(obj)
 		if err != nil {
+			fmt.Println("here is the errror", err)
 			continue
 		}
+		fmt.Printf("----------->%+v\n", conf)
 
 		namedConf, ok := configs[conf.Namespace]
 		if ok {
@@ -236,6 +244,7 @@ func (c *SyntheticServiceEntryController) configStoreUpdate(resources []*sink.Ob
 		// this is done before updating internal cache
 		oldEpVersion := c.endpointVersion(conf.Namespace, conf.Name)
 		newEpVersion := version(conf.Annotations, endpointKey)
+		fmt.Println("EP versions", oldEpVersion, newEpVersion)
 		if oldEpVersion != newEpVersion {
 			if err := c.edsUpdate(conf); err != nil {
 				log.Warnf("edsUpdate: %v", err)
@@ -248,13 +257,19 @@ func (c *SyntheticServiceEntryController) configStoreUpdate(resources []*sink.Ob
 	c.configStoreMu.Unlock()
 
 	if svcChanged {
+		fmt.Println("configUpdate")
 		if c.options.XDSUpdater != nil {
-			c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{Full: true})
+			c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{
+				Full: false,
+				//	ConfigTypesUpdated: map[string]struct{}{schemas.SyntheticServiceEntry.Type: {}},
+			})
+
 		}
 	}
 }
 
 func (c *SyntheticServiceEntryController) incrementalUpdate(resources []*sink.Object) {
+	fmt.Println("----------------incrementalUpdate--------------")
 	svcChanged := c.isFullUpdateRequired(resources)
 	for _, obj := range resources {
 		conf, err := c.convertToConfig(obj)
@@ -290,7 +305,12 @@ func (c *SyntheticServiceEntryController) incrementalUpdate(resources []*sink.Ob
 		}
 	}
 	if svcChanged {
-		c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{Full: true})
+		if c.options.XDSUpdater != nil {
+			c.options.XDSUpdater.ConfigUpdate(&model.PushRequest{
+				Full: false,
+				//	ConfigTypesUpdated: map[string]struct{}{schemas.SyntheticServiceEntry.Type: {}},
+			})
+		}
 	}
 }
 
@@ -328,6 +348,7 @@ func (c *SyntheticServiceEntryController) isFullUpdateRequired(resources []*sink
 		}
 		oldVersion := version(conf.Annotations, serviceKey)
 		newVersion := version(obj.Metadata.Annotations, serviceKey)
+		fmt.Println("versions from annotations", oldVersion, newVersion)
 		if oldVersion != newVersion {
 			return true
 		}

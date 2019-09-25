@@ -17,13 +17,14 @@ package pilot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	xdsapi "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	adsapi "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
-	"github.com/hashicorp/go-multierror"
+	multierror "github.com/hashicorp/go-multierror"
 
 	"google.golang.org/grpc"
 
@@ -101,19 +102,26 @@ func (c *client) WatchDiscovery(timeout time.Duration,
 		defer c.wg.Done()
 
 		for {
+			fmt.Println("before recv")
 			result, err := c.stream.Recv()
+			fmt.Println("after recv")
 			if err != nil {
+
+				fmt.Println("recv err", err)
 				c1 <- err
 				break
 			}
 			// ACK all responses so that when an update arrives we can receive it
+			fmt.Println("before send")
 			err = c.stream.Send(&xdsapi.DiscoveryRequest{
 				Node:          c.lastRequest.Node,
 				ResponseNonce: result.Nonce,
 				VersionInfo:   result.VersionInfo,
 				TypeUrl:       c.lastRequest.TypeUrl,
 			})
+			fmt.Println("after send")
 			if err != nil {
+				fmt.Println("send err", err)
 				c1 <- err
 				break
 			}
@@ -123,6 +131,7 @@ func (c *client) WatchDiscovery(timeout time.Duration,
 				break
 			}
 			if accepted {
+				fmt.Println("accepted")
 				c1 <- nil
 				break
 			}
@@ -132,6 +141,7 @@ func (c *client) WatchDiscovery(timeout time.Duration,
 	case err := <-c1:
 		return err
 	case <-time.After(timeout):
+		fmt.Println("timeout triggered")
 		return errors.New("timed out")
 	}
 }

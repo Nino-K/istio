@@ -81,12 +81,20 @@ func newTestParams(ctx framework.TestContext, ns string) (t testParam) {
 	return t
 }
 
-func (t *testParam) update() {
-	if t.env == environment.Native {
-		t.clusterIP = "10.43.240.11"
-		return
+func (t *testParam) update(test testcase) {
+	switch test {
+	case serviceUpdate:
+		if t.env == environment.Native {
+			t.clusterIP = "10.43.240.11"
+			return
+		}
+		t.port = "8889"
+	case endpointUpdate:
+		if t.env == environment.Native {
+			t.endpoints = []string{"10.40.0.6", "10.40.1.4"}
+			return
+		}
 	}
-	t.port = "8889"
 }
 
 func TestSyntheticServiceEntry(t *testing.T) {
@@ -170,13 +178,13 @@ func TestSyntheticServiceEntry(t *testing.T) {
 	})
 	// service update
 	applyConfig(serviceUpdate, ns, ctx, t)
-	testParams.update()
+	testParams.update(serviceUpdate)
 
 	t.Run("update service", func(t *testing.T) {
 		p.WatchDiscoveryOrFail(t, time.Second*60,
-			func(response *xdsapi.DiscoveryResponse) (b bool, e error) {
+			func(response *xdsapi.DiscoveryResponse) (bool, error) {
 				validator := structpath.ForProto(response)
-				if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check() != nil {
+				if err := validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check(); err != nil {
 					return false, nil
 				}
 				if err := validateSse(validator, testParams); err != nil {
@@ -196,28 +204,34 @@ func TestSyntheticServiceEntry(t *testing.T) {
 
 	// endpoint update
 	applyConfig(endpointUpdate, ns, ctx, t)
+	testParams.update(endpointUpdate)
 
 	t.Run("update endpoint", func(t *testing.T) {
-		p.WatchDiscoveryOrFail(t, time.Second*90,
+		p.WatchDiscoveryOrFail(t, time.Second*60,
 			func(response *xdsapi.DiscoveryResponse) (b bool, e error) {
 				validator := structpath.ForProto(response)
 				if validator.Select("{.resources[?(@.address.socketAddress.portValue==%v)]}", testParams.port).Check() != nil {
+					fmt.Println("-------1-------", err)
 					return false, nil
 				}
 				if err := validateSse(validator, testParams); err != nil {
+					fmt.Println("-------2-------", err)
 					return false, nil
 				}
 				endpoints := getEndpoints(ctx, t, testParams, accessor)
 				// wait for the new replica to become ready
 				if len(endpoints) != 2 {
+					fmt.Println("-------3-------")
 					return false, nil
 				}
 				// verify first endpoint
 				if err := verifyEndpoints(t, client, testParams, endpoints[0]); err != nil {
+					fmt.Println("-------4-------", err)
 					return false, nil
 				}
 				// verify second endpoint
 				if err := verifyEndpoints(t, client, testParams, endpoints[1]); err != nil {
+					fmt.Println("-------5-------", err)
 					return false, nil
 				}
 				return true, nil
@@ -248,12 +262,14 @@ func verifyEndpoints(t *testing.T, c echo.Instance, params testParam, endpoint s
 		if w.Sidecar() != nil {
 			msg, err := w.Sidecar().Clusters()
 			if err != nil {
+				fmt.Println("this fatail???????????????")
 				t.Fatal(err)
 			}
 			validator := structpath.ForProto(msg)
-			err = validator.
-				Select("{.clusterStatuses[?(@.name=='%v')]}", fmt.Sprintf("outbound|%s||%s.%s.svc.cluster.local", params.port, params.svcName, params.namespace)).
-				Equals("true", "{.addedViaApi}").
+			inst := validator.
+				Select("{.clusterStatuses[?(@.name=='%v')]}", fmt.Sprintf("outbound|%s||%s.%s.svc.cluster.local", params.port, params.svcName, params.namespace))
+			fmt.Printf("endpoint %+v=========> %+v\n", endpoint, inst)
+			err = inst.Equals("true", "{.addedViaApi}").
 				ContainSubstring(endpoint, "{.hostStatuses}").
 				ContainSubstring(params.port, "{.hostStatuses}").
 				ContainSubstring("HEALTHY", "{.hostStatuses}").
