@@ -440,7 +440,6 @@ func TestApplyNonIncrementalChange(t *testing.T) {
 }
 
 func TestApplyNonIncrementalAnnotations(t *testing.T) {
-	t.Skip("https://github.com/istio/istio/issues/17814")
 	g := gomega.NewGomegaWithT(t)
 
 	fx := NewFakeXDS()
@@ -650,7 +649,6 @@ func TestApplyIncrementalChange(t *testing.T) {
 }
 
 func TestApplyIncrementalChangesAnnotations(t *testing.T) {
-	t.Skip("https://github.com/istio/istio/issues/17814")
 	g := gomega.NewGomegaWithT(t)
 
 	fx := NewFakeXDS()
