@@ -63,7 +63,7 @@ func (f *FakeXdsUpdater) WorkloadUpdate(id string, labels map[string]string, ann
 func (f *FakeXdsUpdater) ProxyUpdate(clusterID, ip string) {
 }
 
-func TestIncrementalControllerHasSynced(t *testing.T) {
+func TestSSEControllerHasSynced(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 	g.Expect(controller.HasSynced()).To(gomega.BeFalse())
@@ -82,7 +82,7 @@ func TestIncrementalControllerHasSynced(t *testing.T) {
 	}
 }
 
-func TestIncrementalControllerConfigDescriptor(t *testing.T) {
+func TestSSEControllerConfigDescriptor(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -91,7 +91,7 @@ func TestIncrementalControllerConfigDescriptor(t *testing.T) {
 	g.Expect(descriptor.Types()).To(gomega.ContainElement(schemas.SyntheticServiceEntry.Type))
 }
 
-func TestIncrementalControllerListInvalidType(t *testing.T) {
+func TestSSEControllerListInvalidType(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -101,7 +101,7 @@ func TestIncrementalControllerListInvalidType(t *testing.T) {
 	g.Expect(err.Error()).To(gomega.ContainSubstring("list unknown type gateway"))
 }
 
-func TestIncrementalControllerListCorrectTypeNoData(t *testing.T) {
+func TestSSEControllerListCorrectTypeNoData(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -110,7 +110,7 @@ func TestIncrementalControllerListCorrectTypeNoData(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 }
 
-func TestIncrementalControllerListAllNameSpace(t *testing.T) {
+func TestSSEControllerListAllNameSpace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -152,7 +152,7 @@ func TestIncrementalControllerListAllNameSpace(t *testing.T) {
 	}
 }
 
-func TestIncrementalControllerListSpecificNameSpace(t *testing.T) {
+func TestSSEControllerListSpecificNameSpace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -197,7 +197,7 @@ func TestIncrementalControllerListSpecificNameSpace(t *testing.T) {
 	}
 }
 
-func TestIncrementalControllerApplyInvalidType(t *testing.T) {
+func TestSSEControllerApplyInvalidType(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -216,7 +216,7 @@ func TestIncrementalControllerApplyInvalidType(t *testing.T) {
 	g.Expect(err.Error()).To(gomega.ContainSubstring(fmt.Sprintf("apply: type not supported %s", schemas.Gateway.Collection)))
 }
 
-func TestIncrementalControllerApplyMetadataNameIncludesNamespace(t *testing.T) {
+func TestSSEControllerApplyMetadataNameIncludesNamespace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -238,7 +238,7 @@ func TestIncrementalControllerApplyMetadataNameIncludesNamespace(t *testing.T) {
 	g.Expect(c[0].Spec).To(gomega.Equal(message))
 }
 
-func TestIncrementalControllerApplyMetadataNameWithoutNamespace(t *testing.T) {
+func TestSSEControllerApplyMetadataNameWithoutNamespace(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 
 	fx := NewFakeXDS()
@@ -280,7 +280,7 @@ func TestIncrementalControllerApplyMetadataNameWithoutNamespace(t *testing.T) {
 	}
 }
 
-func TestIncrementalControllerApplyChangeNoObjects(t *testing.T) {
+func TestSSEControllerApplyChangeNoObjects(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -315,7 +315,7 @@ func TestIncrementalControllerApplyChangeNoObjects(t *testing.T) {
 	g.Expect(c[0].Spec).To(gomega.Equal(message))
 }
 
-func TestIncrementalControllerApplyInvalidResource(t *testing.T) {
+func TestSSEControllerApplyInvalidResource(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
@@ -338,7 +338,7 @@ func TestIncrementalControllerApplyInvalidResource(t *testing.T) {
 	g.Expect(entries).To(gomega.HaveLen(0))
 }
 
-func TestIncrementalControllerApplyInvalidResource_BadTimestamp(t *testing.T) {
+func TestSSEControllerApplyInvalidResource_BadTimestamp(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	controller := coredatamodel.NewSyntheticServiceEntryController(testControllerOptions)
 
